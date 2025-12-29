@@ -1,11 +1,1285 @@
 <!DOCTYPE html>
-<html lang="en">
-    <head>
-        <meta charset="UTF-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>PakePlus</title>
-    </head>
-    <body>
-        PakePlus
-    </body>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>137刘文涛STM32蓝牙闹钟配置</title>
+    <!-- Tailwind CSS v3 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome -->
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <!-- 统一的 Tailwind 配置 -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#1e40af', // 深蓝色主色调
+                        secondary: '#f97316', // 橙色强调色
+                        dark: '#1e293b', // 深色背景
+                        light: '#f8fafc', // 浅色背景
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif'],
+                    },
+                    animation: {
+                        'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+                    }
+                }
+            }
+        }
+    </script>
+    <style type="text/tailwindcss">
+        @layer utilities {
+            .glass {
+                background: rgba(255, 255, 255, 0.25);
+                backdrop-filter: blur(10px);
+                -webkit-backdrop-filter: blur(10px);
+                border: 1px solid rgba(255, 255, 255, 0.18);
+            }
+            .glass-dark {
+                background: rgba(30, 41, 59, 0.85);
+                backdrop-filter: blur(10px);
+                -webkit-backdrop-filter: blur(10px);
+                border: 1px solid rgba(255, 255, 255, 0.08);
+            }
+            .time-picker {
+                @apply appearance-none bg-transparent border-b-2 border-primary dark:border-secondary text-2xl font-bold text-center w-16 focus:outline-none focus:border-secondary dark:focus:border-secondary;
+            }
+            .time-picker::-webkit-inner-spin-button,
+            .time-picker::-webkit-outer-spin-button {
+                @apply appearance-none;
+            }
+            .switch {
+                @apply relative inline-block w-14 h-7;
+            }
+            .switch input {
+                @apply opacity-0 w-0 h-0;
+            }
+            .slider {
+                @apply absolute cursor-pointer inset-0 bg-gray-300 dark:bg-gray-600 transition-all duration-300 rounded-full;
+            }
+            .slider:before {
+                @apply absolute h-5 w-5 left-1 bottom-1 bg-white transition-all duration-300 rounded-full content-[''];
+            }
+            input:checked + .slider {
+                @apply bg-secondary;
+            }
+            input:checked + .slider:before {
+                @apply transform translate-x-7;
+            }
+            .ringtone-item {
+                @apply flex items-center justify-between p-3 rounded-lg cursor-pointer transition-all duration-200 hover:bg-gray-100 dark:hover:bg-gray-700;
+            }
+            .ringtone-item.active {
+                @apply bg-blue-100 dark:bg-blue-900 border-l-4 border-secondary;
+            }
+            .volume-slider {
+                @apply w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer;
+            }
+            .volume-slider::-webkit-slider-thumb {
+                @apply appearance-none w-6 h-6 bg-secondary rounded-full;
+            }
+            .day-button {
+                @apply w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium transition-all duration-200;
+            }
+            .day-button.active {
+                @apply bg-secondary text-white;
+            }
+            .day-button:not(.active) {
+                @apply bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300;
+            }
+        }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-900 dark:to-indigo-950 min-h-screen transition-colors duration-300">
+    <div class="container mx-auto px-4 py-8 max-w-md">
+        <!-- 顶部连接状态区域 -->
+        <div id="connection-section" class="mb-8">
+            <div class="flex justify-between items-center mb-4">
+                <h1 class="text-2xl font-bold text-primary dark:text-white">STM32蓝牙闹钟</h1>
+                <button id="theme-toggle" class="p-2 rounded-full bg-white dark:bg-gray-800 shadow-md">
+                    <i class="fa fa-moon-o dark:hidden text-gray-600" aria-hidden="true"></i>
+                    <i class="fa fa-sun-o hidden dark:block text-yellow-300" aria-hidden="true"></i>
+                </button>
+            </div>
+            
+            <div id="connection-status" class="glass dark:glass-dark rounded-xl p-4 shadow-lg flex items-center justify-between">
+                <div>
+                    <p class="text-sm text-gray-600 dark:text-gray-300">连接状态</p>
+                    <div class="flex items-center">
+                        <span id="status-text" class="font-medium text-gray-800 dark:text-white">未连接</span>
+                        <span id="status-indicator" class="ml-2 w-3 h-3 rounded-full bg-red-500"></span>
+                    </div>
+                </div>
+                <button id="connect-button" class="bg-primary hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg transition-colors duration-200 flex items-center">
+                    <i class="fa fa-bluetooth mr-2" aria-hidden="true"></i>
+                    <span>扫描设备</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- 时间显示区域 -->
+        <div id="time-section" class="glass dark:glass-dark rounded-xl p-6 shadow-lg mb-8">
+            <p class="text-center text-sm text-gray-600 dark:text-gray-300 mb-2">当前时间</p>
+            <div id="current-time" class="text-center text-4xl font-bold text-gray-800 dark:text-white mb-2">
+                --:--:--
+            </div>
+            <p id="current-date" class="text-center text-sm text-gray-600 dark:text-gray-300">
+                ----年--月--日
+            </p>
+        </div>
+
+        <!-- 闹钟设置区域 -->
+        <div id="alarm-section" class="glass dark:glass-dark rounded-xl p-6 shadow-lg mb-8">
+            <h2 class="text-xl font-bold text-gray-800 dark:text-white mb-4">闹钟设置</h2>
+            
+            <!-- 闹钟时间选择 -->
+            <div class="mb-6">
+                <p class="text-sm text-gray-600 dark:text-gray-300 mb-2">闹钟时间</p>
+                <div class="flex items-center justify-center">
+                    <input type="number" id="alarm-hour" class="time-picker" min="0" max="23" value="07">
+                    <span class="text-2xl font-bold text-gray-800 dark:text-white mx-1">:</span>
+                    <input type="number" id="alarm-minute" class="time-picker" min="0" max="59" value="30">
+                    <span class="text-2xl font-bold text-gray-800 dark:text-white mx-1">:</span>
+                    <input type="number" id="alarm-second" class="time-picker" min="0" max="59" value="00">
+                </div>
+            </div>
+            
+            <!-- 闹钟开关 -->
+            <div class="flex items-center justify-between mb-6">
+                <span class="text-gray-800 dark:text-white">闹钟开关</span>
+                <label class="switch">
+                    <input type="checkbox" id="alarm-toggle">
+                    <span class="slider"></span>
+                </label>
+            </div>
+            
+            <!-- 重复设置 -->
+            <div class="mb-6">
+                <p class="text-sm text-gray-600 dark:text-gray-300 mb-2">重复</p>
+                <div class="flex justify-between">
+                    <button class="day-button" data-day="0">日</button>
+                    <button class="day-button" data-day="1">一</button>
+                    <button class="day-button" data-day="2">二</button>
+                    <button class="day-button" data-day="3">三</button>
+                    <button class="day-button" data-day="4">四</button>
+                    <button class="day-button" data-day="5">五</button>
+                    <button class="day-button" data-day="6">六</button>
+                </div>
+            </div>
+            
+            <!-- 保存按钮 -->
+            <button id="save-alarm" class="w-full bg-secondary hover:bg-orange-600 text-white font-medium py-3 px-4 rounded-lg transition-colors duration-200 flex items-center justify-center">
+                <i class="fa fa-save mr-2" aria-hidden="true"></i>
+                <span>保存闹钟设置</span>
+            </button>
+        </div>
+
+        <!-- 高级设置区域 -->
+        <div id="advanced-section" class="glass dark:glass-dark rounded-xl p-6 shadow-lg mb-8">
+            <h2 class="text-xl font-bold text-gray-800 dark:text-white mb-4">高级设置</h2>
+            
+            <!-- 铃声选择 -->
+            <div class="mb-6">
+                <p class="text-sm text-gray-600 dark:text-gray-300 mb-2">铃声选择</p>
+                <div class="space-y-2 max-h-40 overflow-y-auto pr-2">
+                    <div class="ringtone-item active" data-ringtone="default">
+                        <div>
+                            <p class="font-medium text-gray-800 dark:text-white">默认铃声</p>
+                            <p class="text-xs text-gray-500 dark:text-gray-400">经典闹钟铃声</p>
+                        </div>
+                        <button class="play-ringtone p-2 text-primary dark:text-secondary">
+                            <i class="fa fa-play-circle-o" aria-hidden="true"></i>
+                        </button>
+                    </div>
+                    <div class="ringtone-item" data-ringtone="birds">
+                        <div>
+                            <p class="font-medium text-gray-800 dark:text-white">鸟鸣</p>
+                            <p class="text-xs text-gray-500 dark:text-gray-400">清晨鸟鸣声</p>
+                        </div>
+                        <button class="play-ringtone p-2 text-primary dark:text-secondary">
+                            <i class="fa fa-play-circle-o" aria-hidden="true"></i>
+                        </button>
+                    </div>
+                    <div class="ringtone-item" data-ringtone="digital">
+                        <div>
+                            <p class="font-medium text-gray-800 dark:text-white">电子音</p>
+                            <p class="text-xs text-gray-500 dark:text-gray-400">现代电子铃声</p>
+                        </div>
+                        <button class="play-ringtone p-2 text-primary dark:text-secondary">
+                            <i class="fa fa-play-circle-o" aria-hidden="true"></i>
+                        </button>
+                    </div>
+                    <div class="ringtone-item" data-ringtone="bell">
+                        <div>
+                            <p class="font-medium text-gray-800 dark:text-white">钟声</p>
+                            <p class="text-xs text-gray-500 dark:text-gray-400">教堂钟声</p>
+                        </div>
+                        <button class="play-ringtone p-2 text-primary dark:text-secondary">
+                            <i class="fa fa-play-circle-o" aria-hidden="true"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 音量调节 -->
+            <div class="mb-6">
+                <div class="flex justify-between items-center mb-2">
+                    <p class="text-sm text-gray-600 dark:text-gray-300">音量调节</p>
+                    <span id="volume-value" class="text-sm font-medium text-gray-800 dark:text-white">80%</span>
+                </div>
+                <input type="range" id="volume-slider" class="volume-slider" min="0" max="100" value="80">
+            </div>
+            
+            <!-- 应用设置按钮 -->
+            <button id="apply-settings" class="w-full bg-primary hover:bg-blue-700 text-white font-medium py-3 px-4 rounded-lg transition-colors duration-200 flex items-center justify-center">
+                <i class="fa fa-check mr-2" aria-hidden="true"></i>
+                <span>应用设置</span>
+            </button>
+        </div>
+
+        <!-- 多组闹钟管理 -->
+        <div id="alarms-section" class="glass dark:glass-dark rounded-xl p-6 shadow-lg mb-8">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-bold text-gray-800 dark:text-white">闹钟列表</h2>
+                <button id="add-alarm" class="bg-green-500 hover:bg-green-600 text-white p-2 rounded-full">
+                    <i class="fa fa-plus" aria-hidden="true"></i>
+                </button>
+            </div>
+            
+            <div id="alarms-list" class="space-y-3">
+                <!-- 闹钟项1 -->
+                <div class="alarm-item bg-white dark:bg-gray-800 rounded-lg p-4 shadow flex justify-between items-center">
+                    <div>
+                        <div class="flex items-center">
+                            <h3 class="font-bold text-gray-800 dark:text-white">07:30</h3>
+                            <span class="ml-2 text-xs bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200 px-2 py-1 rounded-full">已启用</span>
+                        </div>
+                        <p class="text-xs text-gray-500 dark:text-gray-400">周一至周五</p>
+                    </div>
+                    <div class="flex items-center">
+                        <button class="edit-alarm p-2 text-primary dark:text-secondary">
+                            <i class="fa fa-pencil" aria-hidden="true"></i>
+                        </button>
+                        <button class="delete-alarm p-2 text-red-500">
+                            <i class="fa fa-trash" aria-hidden="true"></i>
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- 闹钟项2 -->
+                <div class="alarm-item bg-white dark:bg-gray-800 rounded-lg p-4 shadow flex justify-between items-center">
+                    <div>
+                        <div class="flex items-center">
+                            <h3 class="font-bold text-gray-800 dark:text-white">09:00</h3>
+                            <span class="ml-2 text-xs bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200 px-2 py-1 rounded-full">已禁用</span>
+                        </div>
+                        <p class="text-xs text-gray-500 dark:text-gray-400">周六、周日</p>
+                    </div>
+                    <div class="flex items-center">
+                        <button class="edit-alarm p-2 text-primary dark:text-secondary">
+                            <i class="fa fa-pencil" aria-hidden="true"></i>
+                        </button>
+                        <button class="delete-alarm p-2 text-red-500">
+                            <i class="fa fa-trash" aria-hidden="true"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 设备信息区域 -->
+        <div id="device-info" class="glass dark:glass-dark rounded-xl p-4 shadow-lg mb-8 hidden">
+            <h2 class="text-lg font-bold text-gray-800 dark:text-white mb-2">设备信息</h2>
+            <div class="grid grid-cols-2 gap-2 text-sm">
+                <div>
+                    <p class="text-gray-600 dark:text-gray-400">设备名称</p>
+                    <p id="device-name" class="font-medium text-gray-800 dark:text-white">-</p>
+                </div>
+                <div>
+                    <p class="text-gray-600 dark:text-gray-400">设备ID</p>
+                    <p id="device-id" class="font-medium text-gray-800 dark:text-white">-</p>
+                </div>
+                <div>
+                    <p class="text-gray-600 dark:text-gray-400">信号强度</p>
+                    <p id="device-rssi" class="font-medium text-gray-800 dark:text-white">-</p>
+                </div>
+                <div>
+                    <p class="text-gray-600 dark:text-gray-400">固件版本</p>
+                    <p id="device-firmware" class="font-medium text-gray-800 dark:text-white">-</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 设备扫描弹窗 -->
+    <div id="scan-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white dark:bg-gray-800 rounded-xl p-6 max-w-md w-full mx-4">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-bold text-gray-800 dark:text-white">扫描蓝牙设备</h2>
+                <button id="close-scan-modal" class="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
+                    <i class="fa fa-times" aria-hidden="true"></i>
+                </button>
+            </div>
+            
+            <div id="scan-status" class="mb-4 text-center py-4">
+                <div class="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-primary dark:border-secondary mb-2"></div>
+                <p class="text-gray-600 dark:text-gray-300">正在扫描附近的蓝牙设备...</p>
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-2">请确保您的STM32设备已开启蓝牙</p>
+            </div>
+            
+            <div id="devices-list" class="max-h-60 overflow-y-auto mb-4 space-y-2 hidden">
+                <!-- 设备列表将通过JavaScript动态添加 -->
+            </div>
+            
+            <div id="no-devices" class="text-center py-4 hidden">
+                <i class="fa fa-bluetooth text-gray-300 dark:text-gray-600 text-4xl mb-2" aria-hidden="true"></i>
+                <p class="text-gray-600 dark:text-gray-300">未发现任何蓝牙设备</p>
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-2">请检查设备是否开启或在范围内</p>
+            </div>
+            
+            <div class="flex justify-between">
+                <button id="stop-scan" class="bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-800 dark:text-white font-medium py-2 px-4 rounded-lg transition-colors duration-200">
+                    停止扫描
+                </button>
+                <button id="rescan" class="bg-primary hover:bg-blue-700 dark:bg-blue-600 dark:hover:bg-blue-500 text-white font-medium py-2 px-4 rounded-lg transition-colors duration-200 hidden">
+                    重新扫描
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 通知提示 -->
+    <div id="notification" class="fixed bottom-4 left-1/2 transform -translate-x-1/2 bg-green-500 text-white px-4 py-2 rounded-lg shadow-lg z-50 hidden">
+        <div class="flex items-center">
+            <i id="notification-icon" class="fa fa-check-circle mr-2" aria-hidden="true"></i>
+            <span id="notification-message">操作成功</span>
+        </div>
+    </div>
+
+    <script>
+        // Web Bluetooth API相关UUID
+        const ALARM_SERVICE_UUID = '0000180a-0000-1000-8000-00805f9b34fb';
+        const CURRENT_TIME_CHARACTERISTIC = '00002a2b-0000-1000-8000-00805f9b34fb';
+        const ALARM_TIME_CHARACTERISTIC = '00002a24-0000-1000-8000-00805f9b34fb';
+        const ALARM_ENABLE_CHARACTERISTIC = '00002a26-0000-1000-8000-00805f9b34fb';
+        const ALARM_RINGTONE_CHARACTERISTIC = '00002a27-0000-1000-8000-00805f9b34fb';
+        const ALARM_VOLUME_CHARACTERISTIC = '00002a28-0000-1000-8000-00805f9b34fb';
+
+        // 全局变量
+        let device = null;
+        let server = null;
+        let currentTimeCharacteristic = null;
+        let alarmTimeCharacteristic = null;
+        let alarmEnableCharacteristic = null;
+        let alarmRingtoneCharacteristic = null;
+        let alarmVolumeCharacteristic = null;
+        let isConnected = false;
+        let currentAlarmId = 1;
+        let alarms = [
+            {
+                id: 1,
+                hour: 7,
+                minute: 30,
+                second: 0,
+                enabled: true,
+                repeat: [1, 2, 3, 4, 5], // 周一至周五
+                ringtone: 'default',
+                volume: 80
+            },
+            {
+                id: 2,
+                hour: 9,
+                minute: 0,
+                second: 0,
+                enabled: false,
+                repeat: [0, 6], // 周日、周六
+                ringtone: 'birds',
+                volume: 70
+            }
+        ];
+
+        // DOM元素
+        const connectButton = document.getElementById('connect-button');
+        const connectionStatus = document.getElementById('status-text');
+        const statusIndicator = document.getElementById('status-indicator');
+        const scanModal = document.getElementById('scan-modal');
+        const closeScanModal = document.getElementById('close-scan-modal');
+        const scanStatus = document.getElementById('scan-status');
+        const devicesList = document.getElementById('devices-list');
+        const noDevices = document.getElementById('no-devices');
+        const stopScan = document.getElementById('stop-scan');
+        const rescan = document.getElementById('rescan');
+        const deviceInfo = document.getElementById('device-info');
+        const deviceName = document.getElementById('device-name');
+        const deviceId = document.getElementById('device-id');
+        const deviceRssi = document.getElementById('device-rssi');
+        const deviceFirmware = document.getElementById('device-firmware');
+        const currentTimeElement = document.getElementById('current-time');
+        const currentDateElement = document.getElementById('current-date');
+        const alarmHour = document.getElementById('alarm-hour');
+        const alarmMinute = document.getElementById('alarm-minute');
+        const alarmSecond = document.getElementById('alarm-second');
+        const alarmToggle = document.getElementById('alarm-toggle');
+        const saveAlarmButton = document.getElementById('save-alarm');
+        const applySettingsButton = document.getElementById('apply-settings');
+        const volumeSlider = document.getElementById('volume-slider');
+        const volumeValue = document.getElementById('volume-value');
+        const ringtoneItems = document.querySelectorAll('.ringtone-item');
+        const playRingtoneButtons = document.querySelectorAll('.play-ringtone');
+        const dayButtons = document.querySelectorAll('.day-button');
+        const themeToggle = document.getElementById('theme-toggle');
+        const notification = document.getElementById('notification');
+        const notificationMessage = document.getElementById('notification-message');
+        const notificationIcon = document.getElementById('notification-icon');
+        const alarmsList = document.getElementById('alarms-list');
+        const addAlarmButton = document.getElementById('add-alarm');
+        const editAlarmButtons = document.querySelectorAll('.edit-alarm');
+        const deleteAlarmButtons = document.querySelectorAll('.delete-alarm');
+
+        // 初始化
+        document.addEventListener('DOMContentLoaded', () => {
+            // 设置当前时间
+            updateCurrentTime();
+            setInterval(updateCurrentTime, 1000);
+            
+            // 检查主题偏好
+            if (localStorage.getItem('theme') === 'dark' || 
+                (!localStorage.getItem('theme') && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+                document.documentElement.classList.add('dark');
+            }
+            
+            // 初始化重复日期按钮
+            updateDayButtons(alarms[0].repeat);
+            
+            // 初始化音量滑块
+            volumeSlider.addEventListener('input', () => {
+                volumeValue.textContent = `${volumeSlider.value}%`;
+            });
+            
+            // 初始化铃声选择
+            ringtoneItems.forEach(item => {
+                item.addEventListener('click', () => {
+                    ringtoneItems.forEach(i => i.classList.remove('active'));
+                    item.classList.add('active');
+                });
+            });
+            
+            // 初始化播放铃声按钮
+            playRingtoneButtons.forEach(button => {
+                button.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const ringtone = button.closest('.ringtone-item').dataset.ringtone;
+                    playRingtone(ringtone);
+                });
+            });
+            
+            // 初始化重复日期按钮
+            dayButtons.forEach(button => {
+                button.addEventListener('click', () => {
+                    const day = parseInt(button.dataset.day);
+                    toggleDay(day);
+                });
+            });
+            
+            // 初始化主题切换
+            themeToggle.addEventListener('click', () => {
+                document.documentElement.classList.toggle('dark');
+                localStorage.setItem('theme', document.documentElement.classList.contains('dark') ? 'dark' : 'light');
+            });
+            
+            // 初始化蓝牙连接按钮
+            connectButton.addEventListener('click', () => {
+                if (isConnected) {
+                    disconnectFromDevice();
+                } else {
+                    showScanModal();
+                    startScan();
+                }
+            });
+            
+            // 初始化关闭扫描弹窗
+            closeScanModal.addEventListener('click', () => {
+                hideScanModal();
+                stopDeviceScan();
+            });
+            
+            // 初始化停止扫描按钮
+            stopScan.addEventListener('click', () => {
+                stopDeviceScan();
+            });
+            
+            // 初始化重新扫描按钮
+            rescan.addEventListener('click', () => {
+                startScan();
+            });
+            
+            // 初始化保存闹钟按钮
+            saveAlarmButton.addEventListener('click', () => {
+                saveAlarm();
+            });
+            
+            // 初始化应用设置按钮
+            applySettingsButton.addEventListener('click', () => {
+                applySettings();
+            });
+            
+            // 初始化添加闹钟按钮
+            addAlarmButton.addEventListener('click', () => {
+                addNewAlarm();
+            });
+            
+            // 初始化编辑闹钟按钮
+            document.querySelectorAll('.edit-alarm').forEach(button => {
+                button.addEventListener('click', () => {
+                    const alarmItem = button.closest('.alarm-item');
+                    const index = Array.from(alarmsList.children).indexOf(alarmItem);
+                    editAlarm(alarms[index]);
+                });
+            });
+            
+            // 初始化删除闹钟按钮
+            document.querySelectorAll('.delete-alarm').forEach(button => {
+                button.addEventListener('click', () => {
+                    const alarmItem = button.closest('.alarm-item');
+                    const index = Array.from(alarmsList.children).indexOf(alarmItem);
+                    deleteAlarm(alarms[index].id);
+                });
+            });
+            
+            // 初始化时间选择器
+            [alarmHour, alarmMinute, alarmSecond].forEach(input => {
+                input.addEventListener('change', () => {
+                    // 确保值在有效范围内
+                    const min = parseInt(input.min);
+                    const max = parseInt(input.max);
+                    let value = parseInt(input.value);
+                    
+                    if (isNaN(value) || value < min) {
+                        value = min;
+                    } else if (value > max) {
+                        value = max;
+                    }
+                    
+                    input.value = value.toString().padStart(2, '0');
+                });
+                
+                // 点击时全选文本
+                input.addEventListener('focus', () => {
+                    input.select();
+                });
+            });
+            
+            // 检查浏览器是否支持Web Bluetooth API
+            if (!navigator.bluetooth) {
+                showNotification('您的浏览器不支持Web Bluetooth API，请使用Chrome或Edge浏览器', 'error');
+                connectButton.disabled = true;
+                connectButton.classList.add('bg-gray-400');
+                connectButton.classList.remove('bg-primary', 'hover:bg-blue-700');
+            }
+        });
+
+        // 更新当前时间
+        function updateCurrentTime() {
+            const now = new Date();
+            const hours = now.getHours().toString().padStart(2, '0');
+            const minutes = now.getMinutes().toString().padStart(2, '0');
+            const seconds = now.getSeconds().toString().padStart(2, '0');
+            const year = now.getFullYear();
+            const month = (now.getMonth() + 1).toString().padStart(2, '0');
+            const day = now.getDate().toString().padStart(2, '0');
+            
+            currentTimeElement.textContent = `${hours}:${minutes}:${seconds}`;
+            currentDateElement.textContent = `${year}年${month}月${day}日`;
+        }
+
+        // 显示扫描弹窗
+        function showScanModal() {
+            scanModal.classList.remove('hidden');
+        }
+
+        // 隐藏扫描弹窗
+        function hideScanModal() {
+            scanModal.classList.add('hidden');
+        }
+
+        // 开始扫描设备
+        async function startScan() {
+            scanStatus.classList.remove('hidden');
+            devicesList.classList.add('hidden');
+            noDevices.classList.add('hidden');
+            stopScan.classList.remove('hidden');
+            rescan.classList.add('hidden');
+            
+            devicesList.innerHTML = '';
+            
+            try {
+                const options = {
+                    filters: [
+                        { namePrefix: 'STM32' },
+                        { services: [ALARM_SERVICE_UUID] }
+                    ],
+                    optionalServices: [ALARM_SERVICE_UUID]
+                };
+                
+                // 使用requestDevice代替旧版的scan
+                navigator.bluetooth.requestDevice(options)
+                    .then(device => {
+                        console.log('发现设备:', device.name);
+                        addDeviceToList(device);
+                        stopDeviceScan();
+                        connectToDevice(device);
+                    })
+                    .catch(error => {
+                        console.error('扫描错误:', error);
+                        if (error.name === 'NotFoundError') {
+                            noDevices.classList.remove('hidden');
+                        } else {
+                            showNotification(`扫描失败: ${error.message}`, 'error');
+                        }
+                        stopDeviceScan();
+                    });
+                
+                // 模拟扫描结果（实际应用中应移除）
+                setTimeout(() => {
+                    if (devicesList.children.length === 0) {
+                        const mockDevice = {
+                            name: 'STM32 Alarm Clock',
+                            id: 'mock-device-id',
+                            gatt: {
+                                connect: async () => {
+                                    console.log('模拟连接到设备');
+                                    return {
+                                        getPrimaryService: async (service) => {
+                                            console.log('获取服务:', service);
+                                            return {
+                                                getCharacteristic: async (characteristic) => {
+                                                    console.log('获取特征值:', characteristic);
+                                                    // 返回模拟的特征值对象
+                                                    return {
+                                                        readValue: async () => {
+                                                            if (characteristic === CURRENT_TIME_CHARACTERISTIC) {
+                                                                const now = new Date();
+                                                                const buffer = new ArrayBuffer(10);
+                                                                const view = new DataView(buffer);
+                                                                view.setUint16(0, now.getFullYear(), true);
+                                                                view.setUint8(2, now.getMonth() + 1);
+                                                                view.setUint8(3, now.getDate());
+                                                                view.setUint8(4, now.getHours());
+                                                                view.setUint8(5, now.getMinutes());
+                                                                view.setUint8(6, now.getSeconds());
+                                                                return buffer;
+                                                            } else if (characteristic === ALARM_TIME_CHARACTERISTIC) {
+                                                                const buffer = new ArrayBuffer(3);
+                                                                const view = new DataView(buffer);
+                                                                view.setUint8(0, 7); // 小时
+                                                                view.setUint8(1, 30); // 分钟
+                                                                view.setUint8(2, 0); // 秒钟
+                                                                return buffer;
+                                                            } else if (characteristic === ALARM_ENABLE_CHARACTERISTIC) {
+                                                                const buffer = new ArrayBuffer(1);
+                                                                const view = new DataView(buffer);
+                                                                view.setUint8(0, 1); // 启用
+                                                                return buffer;
+                                                            } else if (characteristic === ALARM_RINGTONE_CHARACTERISTIC) {
+                                                                const encoder = new TextEncoder();
+                                                                return encoder.encode('default');
+                                                            } else if (characteristic === ALARM_VOLUME_CHARACTERISTIC) {
+                                                                const buffer = new ArrayBuffer(1);
+                                                                const view = new DataView(buffer);
+                                                                view.setUint8(0, 80); // 音量80%
+                                                                return buffer;
+                                                            }
+                                                            return new ArrayBuffer(0);
+                                                        },
+                                                        writeValue: async (value) => {
+                                                            console.log('写入值:', value);
+                                                            return Promise.resolve();
+                                                        },
+                                                        startNotifications: async () => {
+                                                            console.log('开始通知');
+                                                            return Promise.resolve();
+                                                        }
+                                                    };
+                                                }
+                                            };
+                                        }
+                                    };
+                                }
+                            }
+                        };
+                        addDeviceToList(mockDevice);
+                    }, 2000);
+            } catch (error) {
+                console.error('扫描错误:', error);
+                showNotification(`扫描失败: ${error.message}`, 'error');
+                stopDeviceScan();
+            }
+        }
+
+        // 停止扫描设备
+        function stopDeviceScan() {
+            scanStatus.classList.add('hidden');
+            stopScan.classList.add('hidden');
+            
+            if (devicesList.children.length > 0) {
+                devicesList.classList.remove('hidden');
+            } else {
+                noDevices.classList.remove('hidden');
+            }
+            
+            rescan.classList.remove('hidden');
+        }
+
+        // 添加设备到列表
+        function addDeviceToList(device) {
+            const deviceItem = document.createElement('div');
+            deviceItem.className = 'bg-white dark:bg-gray-700 rounded-lg p-4 shadow flex justify-between items-center cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors duration-200';
+            deviceItem.innerHTML = `
+                <div>
+                    <h3 class="font-bold text-gray-800 dark:text-white">${device.name || '未知设备'}</h3>
+                    <p class="text-xs text-gray-500 dark:text-gray-400">${device.id}</p>
+                </div>
+                <button class="connect-device bg-primary hover:bg-blue-700 text-white p-2 rounded-full">
+                    <i class="fa fa-arrow-right" aria-hidden="true"></i>
+                </button>
+            `;
+            
+            deviceItem.addEventListener('click', () => {
+                connectToDevice(device);
+            });
+            
+            devicesList.appendChild(deviceItem);
+            devicesList.classList.remove('hidden');
+            noDevices.classList.add('hidden');
+        }
+
+        // 连接到设备
+        async function connectToDevice(selectedDevice) {
+            try {
+                device = selectedDevice;
+                
+                // 显示连接中状态
+                connectionStatus.textContent = '连接中...';
+                statusIndicator.className = 'ml-2 w-3 h-3 rounded-full bg-yellow-500 animate-pulse';
+                
+                // 连接到GATT服务器
+                server = await device.gatt.connect();
+                console.log('已连接到GATT服务器');
+                
+                // 获取服务
+                const service = await server.getPrimaryService(ALARM_SERVICE_UUID);
+                console.log('已获取闹钟服务');
+                
+                // 获取特征值
+                currentTimeCharacteristic = await service.getCharacteristic(CURRENT_TIME_CHARACTERISTIC);
+                alarmTimeCharacteristic = await service.getCharacteristic(ALARM_TIME_CHARACTERISTIC);
+                alarmEnableCharacteristic = await service.getCharacteristic(ALARM_ENABLE_CHARACTERISTIC);
+                alarmRingtoneCharacteristic = await service.getCharacteristic(ALARM_RINGTONE_CHARACTERISTIC);
+                alarmVolumeCharacteristic = await service.getCharacteristic(ALARM_VOLUME_CHARACTERISTIC);
+                
+                console.log('已获取所有特征值');
+                
+                // 更新连接状态
+                isConnected = true;
+                connectionStatus.textContent = '已连接';
+                statusIndicator.className = 'ml-2 w-3 h-3 rounded-full bg-green-500';
+                connectButton.innerHTML = '<i class="fa fa-times mr-2" aria-hidden="true"></i><span>断开连接</span>';
+                
+                // 显示设备信息
+                deviceInfo.classList.remove('hidden');
+                deviceName.textContent = device.name || '未知设备';
+                deviceId.textContent = device.id;
+                deviceRssi.textContent = '模拟信号: -65 dBm';
+                deviceFirmware.textContent = 'v1.0.0';
+                
+                // 读取当前闹钟设置
+                await readAlarmSettings();
+                
+                // 设置通知
+                if (currentTimeCharacteristic.properties.notify) {
+                    await currentTimeCharacteristic.startNotifications();
+                    currentTimeCharacteristic.addEventListener('characteristicvaluechanged', handleCurrentTimeChanged);
+                }
+                
+                // 隐藏扫描弹窗
+                hideScanModal();
+                
+                // 显示成功通知
+                showNotification('设备连接成功', 'success');
+                
+            } catch (error) {
+                console.error('连接错误:', error);
+                showNotification(`连接失败: ${error.message}`, 'error');
+                
+                // 更新连接状态
+                isConnected = false;
+                connectionStatus.textContent = '未连接';
+                statusIndicator.className = 'ml-2 w-3 h-3 rounded-full bg-red-500';
+                connectButton.innerHTML = '<i class="fa fa-bluetooth mr-2" aria-hidden="true"></i><span>扫描设备</span>';
+            }
+        }
+
+        // 断开设备连接
+        function disconnectFromDevice() {
+            if (device && device.gatt.connected) {
+                device.gatt.disconnect();
+                console.log('设备已断开连接');
+                
+                // 更新连接状态
+                isConnected = false;
+                connectionStatus.textContent = '未连接';
+                statusIndicator.className = 'ml-2 w-3 h-3 rounded-full bg-red-500';
+                connectButton.innerHTML = '<i class="fa fa-bluetooth mr-2" aria-hidden="true"></i><span>扫描设备</span>';
+                
+                // 隐藏设备信息
+                deviceInfo.classList.add('hidden');
+                
+                // 显示通知
+                showNotification('设备已断开连接', 'info');
+            }
+        }
+
+        // 处理当前时间变化
+        function handleCurrentTimeChanged(event) {
+            const value = event.target.value;
+            const view = new DataView(value.buffer);
+            
+            const year = view.getUint16(0, true);
+            const month = view.getUint8(2);
+            const day = view.getUint8(3);
+            const hours = view.getUint8(4);
+            const minutes = view.getUint8(5);
+            const seconds = view.getUint8(6);
+            
+            currentTimeElement.textContent = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+            currentDateElement.textContent = `${year}年${month.toString().padStart(2, '0')}月${day.toString().padStart(2, '0')}日`;
+        }
+
+        // 读取闹钟设置
+        async function readAlarmSettings() {
+            try {
+                // 读取闹钟时间
+                if (alarmTimeCharacteristic && alarmTimeCharacteristic.properties.read) {
+                    const alarmTimeValue = await alarmTimeCharacteristic.readValue();
+                    const view = new DataView(alarmTimeValue.buffer);
+                    
+                    const hour = view.getUint8(0);
+                    const minute = view.getUint8(1);
+                    const second = view.getUint8(2);
+                    
+                    alarmHour.value = hour.toString().padStart(2, '0');
+                    alarmMinute.value = minute.toString().padStart(2, '0');
+                    alarmSecond.value = second.toString().padStart(2, '0');
+                }
+                
+                // 读取闹钟启用状态
+                if (alarmEnableCharacteristic && alarmEnableCharacteristic.properties.read) {
+                    const alarmEnableValue = await alarmEnableCharacteristic.readValue();
+                    const view = new DataView(alarmEnableValue.buffer);
+                    
+                    alarmToggle.checked = view.getUint8(0) === 1;
+                }
+                
+                // 读取铃声设置
+                if (alarmRingtoneCharacteristic && alarmRingtoneCharacteristic.properties.read) {
+                    const ringtoneValue = await alarmRingtoneCharacteristic.readValue();
+                    const decoder = new TextDecoder();
+                    const ringtone = decoder.decode(ringtoneValue);
+                    
+                    // 更新铃声选择UI
+                    ringtoneItems.forEach(item => {
+                        item.classList.toggle('active', item.dataset.ringtone === ringtone);
+                    });
+                }
+                
+                // 读取音量设置
+                if (alarmVolumeCharacteristic && alarmVolumeCharacteristic.properties.read) {
+                    const volumeValue = await alarmVolumeCharacteristic.readValue();
+                    const view = new DataView(volumeValue.buffer);
+                    
+                    const volume = view.getUint8(0);
+                    volumeSlider.value = volume;
+                    volumeValue.textContent = `${volume}%`;
+                }
+                
+                console.log('已读取闹钟设置');
+            } catch (error) {
+                console.error('读取闹钟设置错误:', error);
+                showNotification(`读取设置失败: ${error.message}`, 'error');
+            }
+        }
+
+        // 保存闹钟设置
+        async function saveAlarm() {
+            try {
+                const hour = parseInt(alarmHour.value);
+                const minute = parseInt(alarmMinute.value);
+                const second = parseInt(alarmSecond.value);
+                const enabled = alarmToggle.checked;
+                
+                // 验证时间
+                if (isNaN(hour) || isNaN(minute) || isNaN(second) || 
+                    hour < 0 || hour > 23 || 
+                    minute < 0 || minute > 59 || 
+                    second < 0 || second > 59) {
+                    showNotification('请输入有效的时间', 'error');
+                    return;
+                }
+                
+                // 获取选中的重复日期
+                const repeat = [];
+                dayButtons.forEach(button => {
+                    if (button.classList.contains('active')) {
+                        repeat.push(parseInt(button.dataset.day));
+                    }
+                });
+                
+                if (repeat.length === 0) {
+                    showNotification('请至少选择一天重复', 'error');
+                    return;
+                }
+                
+                // 获取选中的铃声
+                let ringtone = 'default';
+                ringtoneItems.forEach(item => {
+                    if (item.classList.contains('active')) {
+                        ringtone = item.dataset.ringtone;
+                    }
+                });
+                
+                // 获取音量
+                const volume = parseInt(volumeSlider.value);
+                
+                // 更新本地闹钟数据
+                const alarmIndex = alarms.findIndex(a => a.id === currentAlarmId);
+                if (alarmIndex !== -1) {
+                    alarms[alarmIndex] = {
+                        id: currentAlarmId,
+                        hour,
+                        minute,
+                        second,
+                        enabled,
+                        repeat,
+                        ringtone,
+                        volume
+                    };
+                } else {
+                    // 如果找不到当前闹钟，创建新的
+                    const newAlarm = {
+                        id: currentAlarmId,
+                        hour,
+                        minute,
+                        second,
+                        enabled,
+                        repeat,
+                        ringtone,
+                        volume
+                    };
+                    alarms.push(newAlarm);
+                }
+                
+                // 如果已连接，发送设置到设备
+                if (isConnected) {
+                    // 写入闹钟时间
+                    if (alarmTimeCharacteristic && alarmTimeCharacteristic.properties.write) {
+                        const buffer = new ArrayBuffer(3);
+                        const view = new DataView(buffer);
+                        view.setUint8(0, hour);
+                        view.setUint8(1, minute);
+                        view.setUint8(2, second);
+                        
+                        await alarmTimeCharacteristic.writeValue(buffer);
+                    }
+                    
+                    // 写入闹钟启用状态
+                    if (alarmEnableCharacteristic && alarmEnableCharacteristic.properties.write) {
+                        const buffer = new ArrayBuffer(1);
+                        const view = new DataView(buffer);
+                        view.setUint8(0, enabled ? 1 : 0);
+                        
+                        await alarmEnableCharacteristic.writeValue(buffer);
+                    }
+                    
+                    // 写入铃声设置
+                    if (alarmRingtoneCharacteristic && alarmRingtoneCharacteristic.properties.write) {
+                        const encoder = new TextEncoder();
+                        const value = encoder.encode(ringtone);
+                        
+                        await alarmRingtoneCharacteristic.writeValue(value);
+                    }
+                    
+                    // 写入音量设置
+                    if (alarmVolumeCharacteristic && alarmVolumeCharacteristic.properties.write) {
+                        const buffer = new ArrayBuffer(1);
+                        const view = new DataView(buffer);
+                        view.setUint8(0, volume);
+                        
+                        await alarmVolumeCharacteristic.writeValue(buffer);
+                    }
+                }
+                
+                // 更新闹钟列表UI
+                updateAlarmsList();
+                
+                // 显示成功通知
+                showNotification('闹钟设置已保存', 'success');
+                
+            } catch (error) {
+                console.error('保存闹钟设置错误:', error);
+                showNotification(`保存设置失败: ${error.message}`, 'error');
+            }
+        }
+
+        // 应用设置
+        async function applySettings() {
+            try {
+                // 获取选中的铃声
+                let ringtone = 'default';
+                ringtoneItems.forEach(item => {
+                    if (item.classList.contains('active')) {
+                        ringtone = item.dataset.ringtone;
+                    }
+                });
+                
+                // 获取音量
+                const volume = parseInt(volumeSlider.value);
+                
+                // 更新当前编辑的闹钟设置
+                const alarmIndex = alarms.findIndex(a => a.id === currentAlarmId);
+                if (alarmIndex !== -1) {
+                    alarms[alarmIndex].ringtone = ringtone;
+                    alarms[alarmIndex].volume = volume;
+                }
+                
+                // 如果已连接，发送设置到设备
+                if (isConnected) {
+                    // 写入铃声设置
+                    if (alarmRingtoneCharacteristic && alarmRingtoneCharacteristic.properties.write) {
+                        const encoder = new TextEncoder();
+                        const value = encoder.encode(ringtone);
+                        
+                        await alarmRingtoneCharacteristic.writeValue(value);
+                    }
+                    
+                    // 写入音量设置
+                    if (alarmVolumeCharacteristic && alarmVolumeCharacteristic.properties.write) {
+                        const buffer = new ArrayBuffer(1);
+                        const view = new DataView(buffer);
+                        view.setUint8(0, volume);
+                        
+                        await alarmVolumeCharacteristic.writeValue(buffer);
+                    }
+                }
+                
+                // 更新闹钟列表UI
+                updateAlarmsList();
+                
+                // 显示成功通知
+                showNotification('设置已应用', 'success');
+                
+            } catch (error) {
+                console.error('应用设置错误:', error);
+                showNotification(`应用设置失败: ${error.message}`, 'error');
+            }
+        }
+
+        // 播放铃声预览
+        function playRingtone(ringtone) {
+            // 模拟铃声预览
+            console.log(`播放铃声: ${ringtone}`);
+            
+            // 在实际应用中，这里可以播放音频文件
+            // const audio = new Audio(`ringtones/${ringtone}.mp3`);
+            // audio.play();
+            
+            // 显示通知
+            let ringtoneName = '默认铃声';
+            switch (ringtone) {
+                case 'birds':
+                    ringtoneName = '鸟鸣';
+                    break;
+                case 'digital':
+                    ringtoneName = '电子音';
+                    break;
+                case 'bell':
+                    ringtoneName = '钟声';
+                    break;
+            }
+            
+            showNotification(`正在播放: ${ringtoneName}`, 'info');
+        }
+
+        // 切换重复日期
+        function toggleDay(day) {
+            const button = document.querySelector(`.day-button[data-day="${day}"]`);
+            button.classList.toggle('active');
+        }
+
+        // 更新重复日期按钮状态
+        function updateDayButtons(days) {
+            dayButtons.forEach(button => {
+                const day = parseInt(button.dataset.day);
+                button.classList.toggle('active', days.includes(day));
+            });
+        }
+
+        // 更新闹钟列表UI
+        function updateAlarmsList() {
+            alarmsList.innerHTML = '';
+            
+            alarms.forEach(alarm => {
+                const days = ['日', '一', '二', '三', '四', '五', '六'];
+                const repeatText = alarm.repeat.map(day => days[day]).join('、');
+                
+                const alarmItem = document.createElement('div');
+                alarmItem.className = 'alarm-item bg-white dark:bg-gray-800 rounded-lg p-4 shadow flex justify-between items-center';
+                alarmItem.innerHTML = `
+                    <div>
+                        <div class="flex items-center">
+                            <h3 class="font-bold text-gray-800 dark:text-white">${alarm.hour.toString().padStart(2, '0')}:${alarm.minute.toString().padStart(2, '0')}</h3>
+                            <span class="ml-2 text-xs ${alarm.enabled ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200'} px-2 py-1 rounded-full">${alarm.enabled ? '已启用' : '已禁用'}</span>
+                        </div>
+                        <p class="text-xs text-gray-500 dark:text-gray-400">${repeatText}</p>
+                    </div>
+                    <div class="flex items-center">
+                        <button class="edit-alarm p-2 text-primary dark:text-secondary">
+                            <i class="fa fa-pencil" aria-hidden="true"></i>
+                        </button>
+                        <button class="delete-alarm p-2 text-red-500">
+                            <i class="fa fa-trash" aria-hidden="true"></i>
+                        </button>
+                    </div>
+                `;
+                
+                // 添加编辑按钮事件
+                const editButton = alarmItem.querySelector('.edit-alarm');
+                editButton.addEventListener('click', () => {
+                    editAlarm(alarm);
+                });
+                
+                // 添加删除按钮事件
+                const deleteButton = alarmItem.querySelector('.delete-alarm');
+                deleteButton.addEventListener('click', () => {
+                    deleteAlarm(alarm.id);
+                });
+                
+                alarmsList.appendChild(alarmItem);
+            });
+        }
+
+        // 编辑闹钟
+        function editAlarm(alarm) {
+            // 设置当前编辑的闹钟ID
+            currentAlarmId = alarm.id;
+            
+            // 填充表单
+            alarmHour.value = alarm.hour.toString().padStart(2, '0');
+            alarmMinute.value = alarm.minute.toString().padStart(2, '0');
+            alarmSecond.value = alarm.second.toString().padStart(2, '0');
+            alarmToggle.checked = alarm.enabled;
+            volumeSlider.value = alarm.volume;
+            volumeValue.textContent = `${alarm.volume}%`;
+            
+            // 更新重复日期按钮
+            updateDayButtons(alarm.repeat);
+            
+            // 更新铃声选择
+            ringtoneItems.forEach(item => {
+                item.classList.toggle('active', item.dataset.ringtone === alarm.ringtone);
+            });
+            
+            // 滚动到闹钟设置区域
+            document.getElementById('alarm-section').scrollIntoView({ behavior: 'smooth' });
+            
+            // 显示通知
+            showNotification(`正在编辑闹钟 ${alarm.hour.toString().padStart(2, '0')}:${alarm.minute.toString().padStart(2, '0')}`, 'info');
+        }
+
+        // 删除闹钟
+        function deleteAlarm(id) {
+            if (confirm('确定要删除这个闹钟吗？')) {
+                const index = alarms.findIndex(alarm => alarm.id === id);
+                if (index !== -1) {
+                    alarms.splice(index, 1);
+                    updateAlarmsList();
+                    showNotification('闹钟已删除', 'success');
+                    
+                    // 如果删除的是当前编辑的闹钟，重置表单
+                    if (currentAlarmId === id && alarms.length > 0) {
+                        editAlarm(alarms[0]);
+                    } else if (alarms.length === 0) {
+                        // 如果没有闹钟了，重置表单为默认值
+                        alarmHour.value = '07';
+                        alarmMinute.value = '30';
+                        alarmSecond.value = '00';
+                        alarmToggle.checked = false;
+                        volumeSlider.value = '80';
+                        volumeValue.textContent = '80%';
+                        updateDayButtons([]);
+                        ringtoneItems.forEach(item => {
+                            item.classList.toggle('active', item.dataset.ringtone === 'default');
+                        });
+                        currentAlarmId = 1;
+                    }
+                }
+            }
+        }
+
+        // 添加新闹钟
+        function addNewAlarm() {
+            // 生成新的闹钟ID
+            currentAlarmId = Math.max(...alarms.map(a => a.id), 0) + 1;
+            
+            // 重置表单为默认值
+            alarmHour.value = '08';
+            alarmMinute.value = '00';
+            alarmSecond.value = '00';
+            alarmToggle.checked = true;
+            volumeSlider.value = '80';
+            volumeValue.textContent = '80%';
+            updateDayButtons([1, 2, 3, 4, 5]); // 默认周一至周五
+            ringtoneItems.forEach(item => {
+                item.classList.toggle('active', item.dataset.ringtone === 'default');
+            });
+            
+            // 滚动到闹钟设置区域
+            document.getElementById('alarm-section').scrollIntoView({ behavior: 'smooth' });
+            
+            // 显示通知
+            showNotification('请设置新闹钟', 'info');
+        }
+
+        // 显示通知
+        function showNotification(message, type = 'info') {
+            notificationMessage.textContent = message;
+            
+            // 设置图标和颜色
+            switch (type) {
+                case 'success':
+                    notification.className = 'fixed bottom-4 left-1/2 transform -translate-x-1/2 bg-green-500 text-white px-4 py-2 rounded-lg shadow-lg z-50';
+                    notificationIcon.className = 'fa fa-check-circle mr-2';
+                    break;
+                case 'error':
+                    notification.className = 'fixed bottom-4 left-1/2 transform -translate-x-1/2 bg-red-500 text-white px-4 py-2 rounded-lg shadow-lg z-50';
+                    notificationIcon.className = 'fa fa-exclamation-circle mr-2';
+                    break;
+                case 'info':
+                default:
+                    notification.className = 'fixed bottom-4 left-1/2 transform -translate-x-1/2 bg-blue-500 text-white px-4 py-2 rounded-lg shadow-lg z-50';
+                    notificationIcon.className = 'fa fa-info-circle mr-2';
+                    break;
+            }
+            
+            // 显示通知
+            notification.classList.remove('hidden');
+            
+            // 3秒后隐藏
+            setTimeout(() => {
+                notification.classList.add('hidden');
+            }, 3000);
+        }
+    </script>
+</body>
 </html>
